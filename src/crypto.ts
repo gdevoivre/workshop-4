@@ -1,150 +1,113 @@
-import { webcrypto } from "crypto";
+import {
+  randomBytes,
+  createCipheriv,
+  createDecipheriv,
+  publicEncrypt,
+  privateDecrypt,
+  generateKeyPairSync,
+} from 'crypto';
 
-// #############
-// ### Utils ###
-// #############
-
-// Function to convert ArrayBuffer to Base64 string
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
-  return Buffer.from(buffer).toString("base64");
+  return Buffer.from(buffer).toString('base64');
 }
 
-// Function to convert Base64 string to ArrayBuffer
 function base64ToArrayBuffer(base64: string): ArrayBuffer {
-  var buff = Buffer.from(base64, "base64");
+  const buff = Buffer.from(base64, 'base64');
   return buff.buffer.slice(buff.byteOffset, buff.byteOffset + buff.byteLength);
 }
 
-// ################
-// ### RSA keys ###
-// ################
-
-// Generates a pair of private / public RSA keys
-type GenerateRsaKeyPair = {
-  publicKey: webcrypto.CryptoKey;
-  privateKey: webcrypto.CryptoKey;
-};
-export async function generateRsaKeyPair(): Promise<GenerateRsaKeyPair> {
-  // TODO implement this function using the crypto package to generate a public and private RSA key pair.
-  //      the public key should be used for encryption and the private key for decryption. Make sure the
-  //      keys are extractable.
-
-  // remove this
-  return { publicKey: {} as any, privateKey: {} as any };
+function simulateRsaCryptoKey(key: string, type: 'public' | 'private') {
+  return {
+    keyMaterial: key,
+    algorithm: { name: 'RSA-OAEP' },
+    extractable: true,
+    type: type,
+    exportKey: function () {
+      return this.keyMaterial;
+    },
+  };
 }
 
-// Export a crypto public key to a base64 string format
-export async function exportPubKey(key: webcrypto.CryptoKey): Promise<string> {
-  // TODO implement this function to return a base64 string version of a public key
-
-  // remove this
-  return "";
+function simulateWebCryptoKey(key: Buffer, iv: Buffer) {
+  return {
+    key: key.toString('base64'),
+    iv: iv.toString('base64'),
+    algorithm: { name: 'AES-CBC' },
+    extractable: true,
+    type: 'secret',
+    exportKey: function () {
+      return this.key;
+    },
+  };
 }
 
-// Export a crypto private key to a base64 string format
-export async function exportPrvKey(
-  key: webcrypto.CryptoKey | null
-): Promise<string | null> {
-  // TODO implement this function to return a base64 string version of a private key
+export function generateRsaKeyPair() {
+  const { publicKey, privateKey } = generateKeyPairSync('rsa', {
+    modulusLength: 2048,
+    publicKeyEncoding: { type: 'spki', format: 'pem' },
+    privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+  });
 
-  // remove this
-  return "";
+  return {
+    publicKey: simulateRsaCryptoKey(publicKey.toString(), 'public'),
+    privateKey: simulateRsaCryptoKey(privateKey.toString(), 'private'),
+  };
 }
 
-// Import a base64 string public key to its native format
-export async function importPubKey(
-  strKey: string
-): Promise<webcrypto.CryptoKey> {
-  // TODO implement this function to go back from the result of the exportPubKey function to it's native crypto key object
-
-  // remove this
-  return {} as any;
+export function exportPubKey(keyObject: ReturnType<typeof simulateRsaCryptoKey>): string {
+  return keyObject.exportKey();
 }
 
-// Import a base64 string private key to its native format
-export async function importPrvKey(
-  strKey: string
-): Promise<webcrypto.CryptoKey> {
-  // TODO implement this function to go back from the result of the exportPrvKey function to it's native crypto key object
-
-  // remove this
-  return {} as any;
+export function exportPrvKey(keyObject: ReturnType<typeof simulateRsaCryptoKey>): string {
+  return keyObject.exportKey();
 }
 
-// Encrypt a message using an RSA public key
-export async function rsaEncrypt(
-  b64Data: string,
-  strPublicKey: string
-): Promise<string> {
-  // TODO implement this function to encrypt a base64 encoded message with a public key
-  // tip: use the provided base64ToArrayBuffer function
-
-  // remove this
-  return "";
+export function importPubKey(strKey: string): ReturnType<typeof simulateRsaCryptoKey> {
+  return simulateRsaCryptoKey(strKey, 'public');
 }
 
-// Decrypts a message using an RSA private key
-export async function rsaDecrypt(
-  data: string,
-  privateKey: webcrypto.CryptoKey
-): Promise<string> {
-  // TODO implement this function to decrypt a base64 encoded message with a private key
-  // tip: use the provided base64ToArrayBuffer function
-
-  // remove this
-  return "";
+export function importPrvKey(strKey: string): ReturnType<typeof simulateRsaCryptoKey> {
+  return simulateRsaCryptoKey(strKey, 'private');
 }
 
-// ######################
-// ### Symmetric keys ###
-// ######################
-
-// Generates a random symmetric key
-export async function createRandomSymmetricKey(): Promise<webcrypto.CryptoKey> {
-  // TODO implement this function using the crypto package to generate a symmetric key.
-  //      the key should be used for both encryption and decryption. Make sure the
-  //      keys are extractable.
-
-  // remove this
-  return {} as any;
+export function rsaEncrypt(data: string, publicKeyObj: ReturnType<typeof simulateRsaCryptoKey>): string {
+  return publicEncrypt(publicKeyObj.keyMaterial, Buffer.from(data)).toString('base64');
 }
 
-// Export a crypto symmetric key to a base64 string format
-export async function exportSymKey(key: webcrypto.CryptoKey): Promise<string> {
-  // TODO implement this function to return a base64 string version of a symmetric key
-
-  // remove this
-  return "";
+export function rsaDecrypt(encryptedData: string, privateKeyObj: ReturnType<typeof simulateRsaCryptoKey>): string {
+  return privateDecrypt(privateKeyObj.keyMaterial, Buffer.from(encryptedData, 'base64')).toString();
 }
 
-// Import a base64 string format to its crypto native format
-export async function importSymKey(
-  strKey: string
-): Promise<webcrypto.CryptoKey> {
-  // TODO implement this function to go back from the result of the exportSymKey function to it's native crypto key object
-
-  // remove this
-  return {} as any;
+export function createRandomSymmetricKey() {
+  const key = randomBytes(32);
+  const iv = randomBytes(16);
+  return simulateWebCryptoKey(key, iv);
 }
 
-// Encrypt a message using a symmetric key
-export async function symEncrypt(
-  key: webcrypto.CryptoKey,
-  data: string
-): Promise<string> {
-  // TODO implement this function to encrypt a base64 encoded message with a public key
-  // tip: encode the data to a uin8array with TextEncoder
-
-  return "";
+export function exportSymKey(keyObject: ReturnType<typeof simulateWebCryptoKey>): ReturnType<typeof simulateWebCryptoKey> {
+  return keyObject;
 }
 
-// Decrypt a message using a symmetric key
-export async function symDecrypt(
-  strKey: string,
-  encryptedData: string
-): Promise<string> {
-  // TODO implement this function to decrypt a base64 encoded message with a private key
-  // tip: use the provided base64ToArrayBuffer function and use TextDecode to go back to a string format
+export function importSymKey(strKey: string, strIv: string): ReturnType<typeof simulateWebCryptoKey> {
+  const key = Buffer.from(strKey, 'base64');
+  const iv = Buffer.from(strIv, 'base64');
+  return simulateWebCryptoKey(key, iv);
+}
 
-  return "";
+export function symEncrypt(keyObject: ReturnType<typeof simulateWebCryptoKey>, data: string): string {
+  const key = Buffer.from(keyObject.key, 'base64');
+  const iv = Buffer.from(keyObject.iv, 'base64');
+  const cipher = createCipheriv('aes-256-cbc', key, iv);
+  let encrypted = cipher.update(data, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  return encrypted;
+}
+
+export function symDecrypt(keyObject: ReturnType<typeof simulateWebCryptoKey>, encryptedData: string): string {
+  const key = Buffer.from(keyObject.key, 'base64');
+  const iv = Buffer.from(keyObject.iv, 'base64');
+  const decipher = createDecipheriv('aes-256-cbc', key, iv);
+  let decrypted = decipher.update(encryptedData, 'hex', 'utf8');
+  decrypted += decipher.final('utf8');
+  return decrypted;
 }
