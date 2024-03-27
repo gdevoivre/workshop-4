@@ -1,63 +1,124 @@
+import bodyParser from "body-parser";
 import express from "express";
-import { BASE_USER_PORT } from "../config";
 import axios from "axios";
-import { createRandomSymmetricKey, exportSymKey, symEncrypt, rsaEncrypt, importPubKey } from "../crypto";
+import { NodeRegistry, Node } from "../registry/registry"
+import * as crypto from "../crypto";
+import * as config from "../config";
 
+// Defines the structure for the message sending request body
+export type SendMessageBody = {
+  message: string;
+  destinationUserId: number;
+};
 
+// Structure to log user's message activities
+type UserLog = {
+  lastReceivedMessage: string | null;
+  lastSentMessage: string | null;
+  lastCircuit: number[];
+  update: (message: string, circuit: Node[]) => void;
+}
+
+// Main function to initialize and handle user interactions
 export async function user(userId: number) {
-  const app = express();
-  app.use(express.json());
+  const _user = express();
+  _user.use(express.json());
+  _user.use(bodyParser.json());
 
-  let lastReceivedMessage: string | null = null;
-  let lastSentMessage: string | null = null;
+  // Initialize user log
+  let log: UserLog = { 
+    lastReceivedMessage: null,
+    lastSentMessage: null,
+    lastCircuit: [],
+    update(message: string, circuit: Node[]) {
+      // Only store the NodeId for each node in the circuit
+      this.lastSentMessage = message;
+      this.lastCircuit = circuit.map(circuit => circuit.nodeId);
+    }
+  };
 
-  app.get("/status", (req, res) => {
-    // Health check route to confirm the user server is live
+  // Endpoint to check if the user service is alive
+  _user.get("/status", (req, res) => {
     res.send("live");
   });
 
-  app.post("/message", (req, res) => {
-    // Endpoint for receiving messages. Updates the last received message.
-    const { message } = req.body;
-    lastReceivedMessage = message;
-    console.log(`User ${userId} received message: ${message}`);
-    res.send("Message received");
+  // Retrieves the last message received by the user
+  _user.get("/getLastReceivedMessage", (req, res) => {
+    res.json({ result: log.lastReceivedMessage });
   });
 
-  app.post("/sendMessage", async (req, res) => {
-    // Endpoint to send a message through the onion routing network
-    const { message, destinationUserId } = req.body;
-    try {
-      const nodeRegistry = await axios.get(`http://localhost:${BASE_USER_PORT}/getNodeRegistry`);
-      const nodes = nodeRegistry.data.nodes;
-
-      // Simplified for example purposes: selects the first three nodes for the circuit
-      const circuit = nodes.slice(0, 3);
-      let encryptedMessage = message;
-
-      // Encrypt the message for each node in the circuit
-      for (const node of circuit.reverse()) {
-        const nodePublicKey = await importPubKey(node.pubKey);
-        const symKey = await createRandomSymmetricKey();
-        const symKeyBase64 = await exportSymKey(symKey);
-        encryptedMessage = await symEncrypt(symKey, encryptedMessage);
-        encryptedMessage = await rsaEncrypt(encryptedMessage, symKeyBase64);
-      }
-
-      // Example of sending the encrypted message to the first node in the circuit
-      await axios.post(`http://localhost:${circuit[0].port}/message`, { message: encryptedMessage });
-      console.log(`User ${userId} sent message: ${message}`);
-      lastSentMessage = message;
-      res.send("Message sent through the onion routing network");
-    } catch (error) {
-      console.error(`Error sending message from user ${userId}: ${error}`);
-      res.status(500).send("Error sending message");
-    }
+  // Retrieves the last message sent by the user
+  _user.get("/getLastSentMessage", (req, res) => {
+    res.json({ result: log.lastSentMessage });
   });
 
-  const server = app.listen(BASE_USER_PORT + userId, () => {
-    console.log(`User ${userId} is listening on port ${BASE_USER_PORT + userId}`);
+  // Retrieves the last circuit used for sending a message
+  _user.get("/getLastCircuit", (req, res) => {
+    res.json({ result: log.lastCircuit });
+  });
+
+  // Handles receiving a new message
+  _user.post("/message", (req, res) => {
+    const message: string = req.body.message;
+    log.lastReceivedMessage = message;
+    res.send("success");
+  });
+
+  // Sends a message through the network
+  _user.post("/sendMessage", async (req, res) => {
+    const { message, destinationUserId }: SendMessageBody = req.body;
+    const circuit = await generateRandomCircuit();
+    const encryptedMessage = await encryptMessage(message, destinationUserId, circuit);
+
+    // Send the encrypted message to the entry node of the circuit
+    const entryNode = config.BASE_ONION_ROUTER_PORT + circuit[0].nodeId;
+    await axios.post(`http://localhost:${entryNode}/message`, { message: encryptedMessage });
+
+    log.update(message, circuit);
+    res.sendStatus(200);
+  });
+
+  // Start listening for requests on user-specific port
+  const server = _user.listen(config.BASE_USER_PORT + userId, () => {
+    console.log(`User ${userId} is listening on port ${config.BASE_USER_PORT + userId}`);
   });
 
   return server;
 }
+
+// Generates a random circuit of nodes
+const generateRandomCircuit = async (): Promise<Node[]> => {
+  const registry = await axios.get(`http://localhost:${config.REGISTRY_PORT}/getNodeRegistry`);
+  const allNodes: Node[] = registry.data.nodes;
+  const circuit: Node[] = [];
+
+  // Ensure unique nodes in the circuit
+  while (circuit.length < 3) {
+    const randomIndex = Math.floor(Math.random() * allNodes.length);
+    const randomNode = allNodes[randomIndex];
+    if (!circuit.some(node => node.nodeId === randomNode.nodeId)) {
+      circuit.push(randomNode);
+    }
+  }
+
+  return circuit;
+};
+
+// Encrypts a message for sending through the network
+const encryptMessage = async (message: string, destinationUserId: number, circuit: Node[]): Promise<string> => {
+  let encryptedMessage = message;
+  let previousValue = (config.BASE_USER_PORT + destinationUserId).toString().padStart(10, '0');
+
+  // Encrypt message layer by layer starting from the destination back to the source
+  for (let i = circuit.length - 1; i >= 0; i--) {
+    const currentNode = circuit[i];
+    const symKey = await crypto.createRandomSymmetricKey();
+    const symKeyB64 = await crypto.exportSymKey(symKey);
+    const symEncrypted = await crypto.symEncrypt(symKey, previousValue + encryptedMessage);
+    const rsaEncrypted = await crypto.rsaEncrypt(symKeyB64, currentNode.pubKey);
+    encryptedMessage = rsaEncrypted + symEncrypted;
+    previousValue = (config.BASE_ONION_ROUTER_PORT + currentNode.nodeId).toString().padStart(10, '0');
+  }
+
+  return encryptedMessage;
+};

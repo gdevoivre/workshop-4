@@ -1,7 +1,7 @@
 {
   "name": "simple-onion-router-network",
   "version": "1.0.0",
-  "description": "Simple Tor network implementation",
+  "description": "Simple Tor network implemenation",
   "main": "src/index.ts",
   "scripts": {
     "test": "jest --runInBand",
